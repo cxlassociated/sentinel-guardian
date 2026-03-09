@@ -1,0 +1,50 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isTenantMember(tenantId) {
+      return isAuthenticated() && getUserData().tenantId == tenantId;
+    }
+
+    // Users collection
+    match /users/{userId} {
+      // Users can read their own profile
+      allow read: if isAuthenticated() && request.auth.uid == userId;
+      // Users can read profiles of others in the same tenant
+      allow read: if isAuthenticated() && getUserData().tenantId == resource.data.tenantId;
+      // Only the user can update their own profile
+      allow update: if isAuthenticated() && request.auth.uid == userId;
+      // Allow creation during registration
+      allow create: if isAuthenticated() && request.auth.uid == userId;
+    }
+
+    // Tenants collection
+    match /tenants/{tenantId} {
+      // Only members of the tenant can read its data
+      allow read: if isTenantMember(tenantId);
+      // Only firm-admins can update tenant settings
+      allow update: if isTenantMember(tenantId) && getUserData().role == 'firm-admin';
+      // Allow creation during registration
+      allow create: if isAuthenticated();
+    }
+
+    // Scans collection
+    match /scans/{scanId} {
+      // Users can only read/write scans that belong to their tenant
+      allow read: if isTenantMember(resource.data.tenantId);
+      allow create: if isTenantMember(request.resource.data.tenantId);
+      // Only firm-admins or compliance-officers can update/delete scans
+      allow update, delete: if isTenantMember(resource.data.tenantId) && 
+        (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
+    }
+  }
+}

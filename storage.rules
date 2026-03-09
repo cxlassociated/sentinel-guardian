@@ -1,0 +1,29 @@
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Helper functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    function getUserData() {
+      return firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+    }
+    
+    function isTenantMember(tenantId) {
+      return isAuthenticated() && getUserData().tenantId == tenantId;
+    }
+
+    // Tenant isolated storage
+    match /tenants/{tenantId}/{allPaths=**} {
+      // Only members of the tenant can read/write files in their tenant's folder
+      allow read, write: if isTenantMember(tenantId);
+    }
+    
+    // Public assets (if any)
+    match /public/{allPaths=**} {
+      allow read: if true;
+    }
+  }
+}
