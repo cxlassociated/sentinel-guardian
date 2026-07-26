@@ -1,0 +1,98 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "fullName": { "type": "string" },
+        "firmName": { "type": "string" },
+        "firmId": { "type": "string" },
+        "role": { "type": "string", "enum": ["firm-admin", "advisor", "compliance-officer"] },
+        "title": { "type": "string", "description": "Professional title" },
+        "phone": { "type": "string", "description": "Contact phone number" },
+        "onboardingCompleted": { "type": "boolean", "description": "Whether onboarding is finished" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email", "firmId", "role"]
+    },
+    "Firm": {
+      "title": "Firm",
+      "description": "Investment advisory firm information",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "subscriptionStatus": { "type": "string", "enum": ["trial", "active", "cancelled"] },
+        "adminUid": { "type": "string" }
+      },
+      "required": ["id", "name", "adminUid"]
+    },
+    "Scan": {
+      "title": "Scan",
+      "description": "Compliance scan result",
+      "type": "object",
+      "properties": {
+        "firmId": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "type": { "type": "string" },
+        "contentUrl": { "type": "string" },
+        "risk_level": { "type": "string" },
+        "compliance_score": { "type": "integer" },
+        "violations_detected": { "type": "array", "items": { "type": "string" } },
+        "regulations_triggered": { "type": "array", "items": { "type": "string" } },
+        "rule_references": { "type": "array", "items": { "type": "string" }, "description": "Specific SEC rule citations" },
+        "explanation": { "type": "string" },
+        "suggested_compliant_revision": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["firmId", "userId", "risk_level", "compliance_score"]
+    },
+    "EmployeeTrade": {
+      "title": "Employee Trade",
+      "description": "Record of an employee trade for monitoring",
+      "type": "object",
+      "properties": {
+        "firmId": { "type": "string" },
+        "userId": { "type": "string" },
+        "employeeName": { "type": "string" },
+        "ticker": { "type": "string" },
+        "action": { "type": "string", "enum": ["BUY", "SELL"] },
+        "quantity": { "type": "number" },
+        "price": { "type": "number" },
+        "tradeDate": { "type": "string", "format": "date" },
+        "status": { "type": "string", "enum": ["PENDING", "APPROVED", "FLAGGED", "REJECTED"] },
+        "reviewNotes": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["firmId", "userId", "ticker", "action", "quantity", "tradeDate"]
+    },
+    "ConflictFlag": {
+      "title": "Conflict Flag",
+      "description": "A flagged conflict or front-running case",
+      "type": "object",
+      "properties": {
+        "firmId": { "type": "string" },
+        "tradeId": { "type": "string" },
+        "type": { "type": "string", "enum": ["FRONT-RUNNING", "RESTRICTED-LIST", "INSIDER-TRADING", "OTHER"] },
+        "severity": { "type": "string", "enum": ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["OPEN", "INVESTIGATING", "RESOLVED", "DISMISSED"] },
+        "assignedTo": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["firmId", "tradeId", "type", "severity"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": { "schema": "User", "description": "User profiles" },
+    "/firms/{firmId}": { "schema": "Firm", "description": "Firm settings" },
+    "/scans/{scanId}": { "schema": "Scan", "description": "Compliance scan history" },
+    "/trades/{tradeId}": { "schema": "EmployeeTrade", "description": "Employee trade records" },
+    "/conflicts/{conflictId}": { "schema": "ConflictFlag", "description": "Conflict monitoring flags" }
+  }
+}

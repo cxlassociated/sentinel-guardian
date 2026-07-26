@@ -1,0 +1,231 @@
+import { onCall, HttpsError } from "firebase-functions/v2/https";
+import * as admin from "firebase-admin";
+import { GoogleGenAI, Type } from "@google/genai";
+import * as crypto from "crypto";
+
+admin.initializeApp();
+const db = admin.firestore();
+
+// Pre-warm the AI model pool on function initialization (global scope caching)
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const MODEL_NAME = "gemini-3.1-pro-preview";
+
+export const runComplianceScan = onCall(
+  {
+    concurrency: 100,
+    minInstances: 3,
+    memory: "1GiB",
+    timeoutSeconds: 300,
+  },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError("unauthenticated", "User must be logged in.");
+    }
+
+    const { textInput, fileBase64, fileMimeType, scanId, firmId, userId, title, type, contentUrl } = request.data;
+    if (!scanId || !firmId || !userId) {
+      throw new HttpsError("invalid-argument", "Missing required fields.");
+    }
+
+    const scanRef = db.collection("scans").doc(scanId);
+
+    try {
+      // 1. Initialize the document so the frontend can listen to it
+      await scanRef.set({
+        firmId,
+        userId,
+        title: title || "Compliance Scan",
+        type: type || "marketing",
+        contentUrl: contentUrl || "",
+        originalText: textInput || "",
+        progress: 5,
+        status: "Starting scan...",
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 2. Aggressive Caching
+      const hashInput = (textInput || "") + (fileBase64 || "");
+      const inputHash = crypto.createHash("sha256").update(hashInput).digest("hex");
+      const cacheRef = db.collection("scanCache").doc(inputHash);
+      const cacheDoc = await cacheRef.get();
+
+      if (cacheDoc.exists) {
+        const cacheData = cacheDoc.data();
+        const ageInHours = (Date.now() - cacheData?.createdAt.toMillis()) / (1000 * 60 * 60);
+        
+        if (ageInHours < 24) {
+          // Update progress for frontend
+          await scanRef.update({ 
+            progress: 100, 
+            status: "Retrieved from cache",
+            ...cacheData?.result 
+          });
+          return { success: true, cached: true };
+        }
+      }
+
+      // 3. Real-time progress update: Initializing
+      await scanRef.update({ progress: 15, status: "Initializing AI models..." });
+
+      // 4. Prepare Gemini Prompt
+      const prompt = `
+        You are an expert SEC compliance analysis engine for RIA (Registered Investment Advisor) firms.
+        Analyze the provided advisor marketing language or document for regulatory violations under the SEC Marketing Rule (Rule 206(4)-1), Regulation Best Interest (Reg BI), and the Investment Advisers Act of 1940.
+
+        REGULATORY REFERENCE SOURCES:
+        - SEC Investment Adviser Marketing Rule (Rule 206(4)-1)
+        - SEC Marketing Compliance FAQ
+        - Regulation Best Interest (Reg BI) / FINRA guidance
+        - Regulation S-P (Privacy of Consumer Financial Information)
+
+        SYSTEM OBJECTIVES:
+        - Detect PII (Personally Identifiable Information) and Confidentiality Risks (Regulation S-P):
+          * Flag any account numbers (6-12 digit strings, even if embedded in text).
+          * Flag SSNs (XXX-XX-XXXX or 9-digit strings).
+          * Flag client identifiers (e.g., "Client ID: 12345", "Account Ref: ABC-789").
+          * Flag client names, addresses, or specific financial details (balances, holdings) that should be confidential.
+          * Identify security risks related to data privacy and Regulation S-P.
+        - Detect Promissory Language & Misleading Claims (Rule 206(4)-1(a)(1)):
+          * Flag "guaranteed", "no risk", "always profitable", "safe", "secure returns", "bulletproof".
+          * Identify unsubstantiated superlatives (e.g., "best", "top-rated", "leading", "unique", "unmatched") as per SEC FAQ guidance on "fair and balanced" presentations.
+        - Identify Misleading Performance Framing & Cherry-picking (Rule 206(4)-1(a)(2)):
+          * Detect if only positive performance data is being highlighted without context or risk disclosures.
+          * Flag misleading benchmark comparisons or "cherry-picked" time periods.
+        - Reg BI & Care Obligation Analysis:
+          * Identify recommendations that appear to prioritize firm profit over client best interest.
+          * Flag missing or inadequate conflict of interest disclosures.
+        - Testimonial/Endorsement Violations (Rule 206(4)-1(b)):
+          * Identify client praise or third-party ratings used without required disclosures (e.g., whether compensation was paid).
+
+        SCORING ALGORITHM:
+        - Start at 0.
+        - Add 40-60 points for each CRITICAL risk (PII leak, SSN, Account Number).
+        - Add 20-30 points for each HIGH risk (Promissory language, misleading performance, Reg BI violation).
+        - Add 10-15 points for each MEDIUM risk (Missing disclosures, unsubstantiated superlatives).
+        - Add 5 points for each LOW risk (Minor formatting or clarity issues).
+        - Cap at 100.
+        - 0-25: LOW RISK (Clear, balanced, includes disclosures)
+        - 26-50: MODERATE RISK (Minor issues, needs slight adjustment)
+        - 51-75: HIGH RISK (Significant violations, needs rewrite)
+        - 76-100: CRITICAL RISK (Severe violations, potential enforcement action)
+
+        OUTPUT REQUIREMENTS:
+        - Provide credible, precise, and professional explanations.
+        - Use specific rule citations in 'rule_references' (e.g., "SEC Rule 206(4)-1(a)(1)", "17 CFR § 240.15l-1 (Reg BI)").
+        - Suggested compliant revisions should be realistic, professional, and reflect regulatory "safe harbor" language where applicable.
+      `;
+
+      let contents: any;
+      if (fileBase64 && fileMimeType) {
+        contents = {
+          parts: [
+            { text: prompt + (textInput ? `\n\nADDITIONAL CONTEXT:\n"""\n${textInput}\n"""` : '') },
+            {
+              inlineData: {
+                data: fileBase64,
+                mimeType: fileMimeType
+              }
+            }
+          ]
+        };
+      } else {
+        contents = {
+          parts: [
+            { text: prompt + `\n\nTEXT TO ANALYZE:\n"""\n${textInput}\n"""` }
+          ]
+        };
+      }
+
+      await scanRef.update({ progress: 40, status: "Analyzing compliance risks..." });
+
+      // 5. Call Gemini
+      const response = await ai.models.generateContent({
+        model: MODEL_NAME,
+        contents,
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.OBJECT,
+            properties: {
+              risk_level: {
+                type: Type.STRING,
+                enum: ["LOW RISK", "MODERATE RISK", "HIGH RISK", "CRITICAL RISK"],
+              },
+              compliance_score: {
+                type: Type.INTEGER,
+              },
+              violations_detected: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              regulations_triggered: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              rule_references: {
+                type: Type.ARRAY,
+                items: { type: Type.STRING },
+              },
+              privacy_findings: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    severity: { type: Type.STRING, enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+                  },
+                  required: ["title", "description", "severity"]
+                }
+              },
+              marketing_findings: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    title: { type: Type.STRING },
+                    description: { type: Type.STRING },
+                    severity: { type: Type.STRING, enum: ["LOW", "MEDIUM", "HIGH", "CRITICAL"] },
+                  },
+                  required: ["title", "description", "severity"]
+                }
+              },
+              explanation: {
+                type: Type.STRING,
+              },
+              suggested_compliant_revision: {
+                type: Type.STRING,
+              }
+            },
+            required: ["risk_level", "compliance_score", "violations_detected", "regulations_triggered", "rule_references", "privacy_findings", "marketing_findings", "explanation", "suggested_compliant_revision"]
+          }
+        }
+      });
+
+      await scanRef.update({ progress: 85, status: "Finalizing report..." });
+
+      const jsonStr = response.text?.trim() || '{}';
+      const scanResult = JSON.parse(jsonStr);
+
+      // 6. Save to Cache
+      await cacheRef.set({
+        inputHash,
+        result: scanResult,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      });
+
+      // 7. Update Firestore with final results
+      await scanRef.update({ 
+        progress: 100, 
+        status: "Analysis Complete",
+        ...scanResult 
+      });
+
+      return { success: true };
+    } catch (error) {
+      console.error("Scan Error:", error);
+      await scanRef.update({ progress: 0, status: "Error during scan" });
+      throw new HttpsError("internal", "Failed to run compliance scan", error);
+    }
+  }
+);

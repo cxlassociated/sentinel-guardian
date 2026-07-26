@@ -1,5 +1,16 @@
 import React from 'react';
-import { Settings as SettingsIcon, CreditCard, Users, Shield, Building2 } from 'lucide-react';
+import { 
+  Settings as SettingsIcon, 
+  CreditCard, 
+  Users, 
+  Shield, 
+  Building2,
+  Zap,
+  Globe,
+  Database,
+  FileText,
+  Activity
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Settings() {
@@ -24,7 +35,26 @@ export default function Settings() {
             </span>
           </div>
           
-          <div className="p-6 md:col-span-3 space-y-6">
+          <div className="p-6 md:col-span-3 space-y-8">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Full Name</label>
+                <p className="text-sm font-medium text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-100">{profile?.fullName}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Work Email</label>
+                <p className="text-sm font-medium text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-100">{profile?.email}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Professional Title</label>
+                <p className="text-sm font-medium text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-100">{profile?.title || 'Not specified'}</p>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-gray-500 uppercase tracking-wider mb-2">Phone Number</label>
+                <p className="text-sm font-medium text-gray-900 bg-gray-50 p-3 rounded-lg border border-gray-100">{profile?.phone || 'Not specified'}</p>
+              </div>
+            </div>
+
             <div>
               <h4 className="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
                 <Users className="w-4 h-4 text-[#4BB7BA]" /> Team Members
@@ -35,7 +65,7 @@ export default function Settings() {
                     {profile?.email?.[0].toUpperCase() || 'U'}
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{profile?.email}</p>
+                    <p className="text-sm font-medium text-gray-900">{profile?.fullName || profile?.email}</p>
                     <p className="text-xs text-gray-500 capitalize">{profile?.role.replace('-', ' ')}</p>
                   </div>
                 </div>
@@ -74,6 +104,77 @@ export default function Settings() {
                   <span className="text-sm text-gray-700">Auto-archive all scans to WORM storage</span>
                 </label>
               </div>
+            </div>
+          </div>
+        </div>
+        {/* API & Integrations Section */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <Zap className="w-5 h-5 text-[#265C7E]" />
+              API & External Integrations
+            </h2>
+            <span className="px-2 py-1 bg-blue-100 text-blue-700 rounded text-[10px] font-bold uppercase tracking-wider">Enterprise Feature</span>
+          </div>
+          <div className="p-6 space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <div className="p-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center text-center space-y-3">
+                <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center">
+                  <Globe className="w-6 h-6 text-gray-400" />
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900">Connect CRM (Salesforce/HubSpot)</p>
+                  <p className="text-xs text-gray-500 mt-1">Automatically scan client communications from your CRM.</p>
+                </div>
+                <button disabled className="px-4 py-2 bg-gray-200 text-gray-500 rounded-lg text-sm font-bold cursor-not-allowed">
+                  Coming Soon
+                </button>
+              </div>
+              <div className="p-4 rounded-xl border border-dashed border-gray-200 bg-gray-50 flex flex-col items-center justify-center text-center space-y-3">
+                <div className="w-12 h-12 bg-white rounded-full shadow-sm flex items-center justify-center">
+                  <Database className="w-6 h-6 text-gray-400" />
+                </div>
+                <div>
+                  <p className="font-bold text-gray-900">Document Management System</p>
+                  <p className="text-xs text-gray-500 mt-1">Direct integration for automated policy and procedure scanning.</p>
+                </div>
+                <button disabled className="px-4 py-2 bg-gray-200 text-gray-500 rounded-lg text-sm font-bold cursor-not-allowed">
+                  Coming Soon
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* ADV Filing Workflow Section */}
+        <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
+          <div className="px-6 py-4 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+            <h2 className="text-lg font-bold text-gray-900 flex items-center gap-2">
+              <FileText className="w-5 h-5 text-[#265C7E]" />
+              ADV Filing & Disclosure Workflow
+            </h2>
+            <span className="px-2 py-1 bg-gray-100 text-gray-700 rounded text-[10px] font-bold uppercase tracking-wider">Coming Soon</span>
+          </div>
+          <div className="p-6 space-y-4">
+            <div className="flex items-start gap-4 p-4 bg-purple-50 rounded-xl border border-purple-100">
+              <div className="p-2 bg-white rounded-lg shadow-sm">
+                <Activity className="w-5 h-5 text-purple-600" />
+              </div>
+              <div>
+                <p className="font-bold text-purple-900">Automated ADV Part 2A Review</p>
+                <p className="text-sm text-purple-700 mt-1">
+                  Our upcoming module will automatically cross-reference your marketing claims against your Form ADV disclosures to ensure consistency and regulatory alignment.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-between p-4 rounded-xl border border-gray-100">
+              <div className="flex items-center gap-3">
+                <div className="w-2 h-2 bg-purple-400 rounded-full animate-pulse" />
+                <span className="text-sm font-medium text-gray-700">Currently mapping SEC Rule 206(4)-7 requirements...</span>
+              </div>
+              <button disabled className="text-sm font-bold text-purple-600 opacity-50 cursor-not-allowed">
+                View Roadmap
+              </button>
             </div>
           </div>
         </div>

@@ -1,5 +1,8 @@
 {
   "name": "Sentinel Guardian",
   "description": "AI Communications & Marketing Compliance Scanner for RIA advisory firms.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }

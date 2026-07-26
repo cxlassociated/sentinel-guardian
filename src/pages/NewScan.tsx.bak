@@ -1,7 +1,8 @@
 import React, { useState, useCallback, useRef } from 'react';
 import { motion } from 'motion/react';
 import { useDropzone, DropzoneOptions } from 'react-dropzone';
-import { UploadCloud, FileText, AlertTriangle, CheckCircle, Loader2, Info, ArrowRight, Download, ShieldCheck, ShieldAlert, AlertOctagon, X, Zap, Cpu } from 'lucide-react';
+import { UploadCloud, FileText, AlertTriangle, CheckCircle, Loader2, Info, ArrowRight, Download, ShieldCheck, ShieldAlert, AlertOctagon, X } from 'lucide-react';
+import { GoogleGenAI, Type } from '@google/genai';
 import { collection, addDoc, serverTimestamp, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
@@ -9,8 +10,8 @@ import { db, storage, functions } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import ScanProgressModal from '../components/ScanProgressModal';
-import { extractPdfTextInBrowser, PdfExtractionResult } from '../lib/pdfExtractor';
-import { isDevEnvironment } from '../lib/env';
+
+const ai = new GoogleGenAI({ apiKey: import.meta.env.VITE_GEMINI_API_KEY || process.env.GEMINI_API_KEY || 'mock-key' });
 
 interface Finding {
   title: string;
@@ -28,77 +29,13 @@ interface ScanResult {
   marketing_findings: Finding[];
   explanation: string;
   suggested_compliant_revision: string;
-  performance_metrics?: {
-    model_used?: string;
-    total_scan_time_ms?: number;
-    gemini_response_time_ms?: number;
-    pdf_extraction_time_ms?: number;
-    extracted_text_length?: number;
-    document_size_bytes?: number;
-    pdf_fallback_used?: boolean;
-  };
 }
 
 export default function NewScan() {
-  const { profile, isDevDemo } = useAuth();
+  const { profile } = useAuth();
   const navigate = useNavigate();
   const [textInput, setTextInput] = useState('');
-
-  const runServerGeminiScan = async (
-    documentSizeBytes: number,
-    isPdfExtracted: boolean,
-    sendBase64ToGemini?: string,
-    sendMimeTypeToGemini?: string
-  ) => {
-    setScanProgress(15);
-    setScanStatus(`Initializing ${modelPreference} engine on secure server...`);
-
-    setScanProgress(40);
-    setScanStatus(`Analyzing compliance text payload...`);
-
-    const response = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        textInput,
-        fileBase64: sendBase64ToGemini,
-        fileMimeType: sendMimeTypeToGemini,
-        modelPreference,
-        documentSizeBytes,
-        isPdfExtracted,
-        pdfExtractionTimeMs: pdfMetrics?.extractionTimeMs || 0,
-        extractedTextLength: textInput.length,
-      }),
-    });
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || `Server compliance analysis error (${response.status})`);
-    }
-
-    setScanProgress(85);
-    setScanStatus("Finalizing compliance report...");
-
-    const scanResult: ScanResult = await response.json();
-    setScanProgress(100);
-    setResult(scanResult);
-    setIsScanning(false);
-  };
-  const [selectedFile, setSelectedFile] = useState<{
-    file: File;
-    base64: string;
-    mimeType: string;
-    isPdfExtracted?: boolean;
-    extractedText?: string;
-  } | null>(null);
-  const [pdfMetrics, setPdfMetrics] = useState<{
-    extractionTimeMs?: number;
-    pageCount?: number;
-    extractedTextLength?: number;
-    isPdfExtracted?: boolean;
-    isScannedOrFailed?: boolean;
-  } | null>(null);
-  const [modelPreference, setModelPreference] = useState<'gemini-3.6-flash' | 'gemini-3.1-pro-preview'>('gemini-3.6-flash');
+  const [selectedFile, setSelectedFile] = useState<{ file: File, base64: string, mimeType: string } | null>(null);
   const [isScanning, setIsScanning] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [result, setResult] = useState<ScanResult | null>(null);
@@ -111,63 +48,17 @@ export default function NewScan() {
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
     if (acceptedFiles.length > 0) {
       const file = acceptedFiles[0];
-      setPdfMetrics(null);
       
       if (file.type === 'text/plain') {
         const text = await file.text();
         setTextInput(text);
         setSelectedFile(null);
         setActiveTab('paste');
-      } else if (file.type === 'application/pdf') {
-        const reader = new FileReader();
-        reader.onload = async () => {
-          const base64 = (reader.result as string).split(',')[1];
-          
-          // Attempt in-browser PDF text extraction
-          const extractionResult: PdfExtractionResult = await extractPdfTextInBrowser(file);
-          
-          if (extractionResult.success && !extractionResult.isScannedOrFailed) {
-            setPdfMetrics({
-              extractionTimeMs: extractionResult.extractionTimeMs,
-              pageCount: extractionResult.pageCount,
-              extractedTextLength: extractionResult.extractedTextLength,
-              isPdfExtracted: true,
-              isScannedOrFailed: false,
-            });
-            setSelectedFile({
-              file,
-              base64,
-              mimeType: file.type,
-              isPdfExtracted: true,
-              extractedText: extractionResult.text,
-            });
-            setTextInput(extractionResult.text);
-            setActiveTab('paste');
-          } else {
-            // Graceful fallback to raw PDF multimodal flow
-            setPdfMetrics({
-              extractionTimeMs: extractionResult.extractionTimeMs,
-              pageCount: extractionResult.pageCount,
-              extractedTextLength: 0,
-              isPdfExtracted: false,
-              isScannedOrFailed: true,
-            });
-            setSelectedFile({
-              file,
-              base64,
-              mimeType: file.type,
-              isPdfExtracted: false,
-            });
-            setTextInput(`[File attached: ${file.name} - Scanned/Image PDF Fallback Engaged]\n\nReady for analysis.`);
-            setActiveTab('paste');
-          }
-        };
-        reader.readAsDataURL(file);
       } else {
         const reader = new FileReader();
         reader.onload = () => {
           const base64 = (reader.result as string).split(',')[1];
-          setSelectedFile({ file, base64, mimeType: file.type, isPdfExtracted: false });
+          setSelectedFile({ file, base64, mimeType: file.type });
           setTextInput(`[File attached: ${file.name}]\n\nReady for analysis.`);
           setActiveTab('paste');
         };
@@ -190,15 +81,10 @@ export default function NewScan() {
 
   const handleClearFile = () => {
     setSelectedFile(null);
-    setPdfMetrics(null);
     setTextInput('');
   };
 
-  const handlePrint = (e?: React.MouseEvent) => {
-    if (e) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
+  const handlePrint = () => {
     window.print();
   };
 
@@ -213,24 +99,7 @@ export default function NewScan() {
     setError(null);
     setResult(null);
     setScanProgress(0);
-    setScanStatus('Initializing scan...');
-
-    const documentSizeBytes = selectedFile ? selectedFile.file.size : new Blob([textInput]).size;
-    const isPdfExtracted = selectedFile?.isPdfExtracted ?? false;
-    const sendBase64ToGemini = selectedFile && !isPdfExtracted ? selectedFile.base64 : undefined;
-    const sendMimeTypeToGemini = selectedFile && !isPdfExtracted ? selectedFile.mimeType : undefined;
-
-    // Direct client execution in development demo mode or when Cloud Functions aren't active
-    if (isDevDemo) {
-      try {
-        await runServerGeminiScan(documentSizeBytes, isPdfExtracted, sendBase64ToGemini, sendMimeTypeToGemini);
-      } catch (err: any) {
-        console.error("Server Gemini scan error:", err);
-        setError(err.message || "Server Gemini scan failed.");
-        setIsScanning(false);
-      }
-      return;
-    }
+    setScanStatus('Initializing...');
 
     try {
       if (!profile?.firmId || !profile?.uid) {
@@ -278,27 +147,17 @@ export default function NewScan() {
         firmId: profile.firmId,
         userId: profile.uid,
         textInput: textInput,
-        fileBase64: sendBase64ToGemini,
-        fileMimeType: sendMimeTypeToGemini,
+        fileBase64: selectedFile?.base64,
+        fileMimeType: selectedFile?.mimeType,
         title: selectedFile ? selectedFile.file.name : (textInput.substring(0, 50) + '...'),
         type: selectedFile ? (selectedFile.mimeType.includes('pdf') ? 'PDF Document' : 'Image/Media') : 'Text Analysis',
         contentUrl,
-        modelPreference,
-        pdfExtractionTimeMs: pdfMetrics?.extractionTimeMs || 0,
-        documentSizeBytes,
-        extractedTextLength: textInput.length,
-        isPdfExtracted,
       });
       
     } catch (err: any) {
-      console.warn("Cloud function unavailable, utilizing secure server Gemini endpoint:", err);
-      try {
-        await runServerGeminiScan(documentSizeBytes, isPdfExtracted, sendBase64ToGemini, sendMimeTypeToGemini);
-      } catch (fallbackErr: any) {
-        console.error("Server Gemini scan error:", fallbackErr);
-        setError(fallbackErr.message || 'An error occurred during the scan.');
-        setIsScanning(false);
-      }
+      console.error(err);
+      setError(err.message || 'An error occurred during the scan.');
+      setIsScanning(false);
     }
   };
 
@@ -388,66 +247,6 @@ export default function NewScan() {
               </div>
             )}
 
-            {pdfMetrics && (
-              <div className={`mt-3 p-2.5 rounded-lg text-xs font-medium border flex items-center gap-2 ${
-                pdfMetrics.isPdfExtracted 
-                  ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                  : 'bg-amber-50 border-amber-200 text-amber-800'
-              }`}>
-                {pdfMetrics.isPdfExtracted ? (
-                  <>
-                    <Zap className="w-4 h-4 text-emerald-600 shrink-0" />
-                    <span>
-                      In-browser text extracted in <strong>{pdfMetrics.extractionTimeMs}ms</strong> ({pdfMetrics.pageCount} pg, {pdfMetrics.extractedTextLength} chars) • <em>Base64 bypass active</em>
-                    </span>
-                  </>
-                ) : (
-                  <>
-                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>
-                      Scanned / Image PDF detected ({pdfMetrics.extractionTimeMs}ms) • <em>Base64 fallback engaged</em>
-                    </span>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Model Selection Selector (Dev Preview Only) */}
-            {isDevEnvironment() && (
-              <div className="mt-4 pt-4 border-t border-gray-100">
-                <label className="text-xs font-bold text-gray-700 uppercase tracking-wider block mb-2 flex items-center justify-between">
-                  <span>AI Engine Selection</span>
-                  <span className="text-[10px] text-gray-400 font-normal">A/B Testing Mode</span>
-                </label>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setModelPreference('gemini-3.6-flash')}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all ${
-                      modelPreference === 'gemini-3.6-flash'
-                        ? 'bg-[#265C7E] text-white border-[#265C7E] shadow-sm'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
-                    }`}
-                  >
-                    <Zap className="w-3.5 h-3.5" />
-                    <span>3.6 Flash (Fast)</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setModelPreference('gemini-3.1-pro-preview')}
-                    className={`py-2 px-3 rounded-lg text-xs font-semibold flex items-center justify-center gap-1.5 border transition-all ${
-                      modelPreference === 'gemini-3.1-pro-preview'
-                        ? 'bg-[#265C7E] text-white border-[#265C7E] shadow-sm'
-                        : 'bg-gray-50 text-gray-700 border-gray-200 hover:bg-gray-100'
-                    }`}
-                  >
-                    <Cpu className="w-3.5 h-3.5" />
-                    <span>3.1 Pro (Fallback)</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
             {error && (
               <div className="mt-4 p-3 bg-red-50 text-red-700 text-sm rounded-lg flex items-start gap-2">
                 <AlertTriangle className="w-5 h-5 shrink-0" />
@@ -483,11 +282,7 @@ export default function NewScan() {
               Analysis Report
             </h2>
             {result && (
-              <button 
-                type="button" 
-                onClick={handlePrint} 
-                className="text-sm font-medium text-[#265C7E] hover:text-[#1A425B] flex items-center gap-1 print:hidden cursor-pointer"
-              >
+              <button onClick={handlePrint} className="text-sm font-medium text-[#265C7E] hover:text-[#1A425B] flex items-center gap-1 print:hidden">
                 <Download className="w-4 h-4" /> Export PDF
               </button>
             )}
@@ -547,21 +342,6 @@ export default function NewScan() {
               </div>
             ) : result ? (
               <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                {/* Print Only Official Report Header */}
-                <div className="hidden print:block mb-6 pb-4 border-b-2 border-gray-900">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h1 className="text-2xl font-black text-gray-900 tracking-tight">Sentinel Guardian AI</h1>
-                      <p className="text-sm font-bold text-gray-700 uppercase tracking-wider">SEC Compliance Analysis Report (Rule 206(4)-1 & Reg BI)</p>
-                    </div>
-                    <div className="text-right text-xs text-gray-700 space-y-0.5">
-                      <p className="font-bold text-gray-900">{profile?.firmName || 'Demo Advisory Partners'}</p>
-                      <p>Generated: {new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' })}</p>
-                      <p className="font-mono text-[10px] text-gray-500">Engine: {result.performance_metrics?.model_used || modelPreference}</p>
-                    </div>
-                  </div>
-                </div>
-
                 {/* Score Header */}
                 <div className={`p-6 rounded-xl border ${getRiskColor(result.risk_level)} print:border-2 print:border-gray-300 print:bg-transparent print:text-gray-900`}>
                   <div className="flex items-start justify-between">
@@ -701,48 +481,6 @@ export default function NewScan() {
                       <p className="text-sm text-[#265C7E] font-medium leading-relaxed print:text-gray-900">
                         {result.suggested_compliant_revision}
                       </p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Performance Instrumentation Metrics (Phase 1) (Dev Preview Only) */}
-                {isDevEnvironment() && result.performance_metrics && (
-                  <div className="mt-6 p-4 rounded-lg bg-slate-900 text-slate-100 font-mono text-xs space-y-2 print:hidden">
-                    <div className="flex items-center justify-between text-slate-400 font-sans text-xs border-b border-slate-800 pb-2">
-                      <span className="font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                        <Zap className="w-3.5 h-3.5" /> Performance Telemetry (Phase 1)
-                      </span>
-                      <span className="bg-slate-800 px-2 py-0.5 rounded text-[10px] text-slate-300">
-                        Model: {result.performance_metrics.model_used || 'gemini-3.6-flash'}
-                      </span>
-                    </div>
-                    <div className="grid grid-cols-2 gap-2 pt-1 text-[11px]">
-                      <div>
-                        <span className="text-slate-500">Total Scan Time: </span>
-                        <span className="text-emerald-300 font-bold">{result.performance_metrics.total_scan_time_ms} ms</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Gemini Response: </span>
-                        <span className="text-cyan-300 font-bold">{result.performance_metrics.gemini_response_time_ms} ms</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">PDF Extractor Time: </span>
-                        <span className="text-amber-300 font-bold">{result.performance_metrics.pdf_extraction_time_ms ?? 0} ms</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Extracted Text Length: </span>
-                        <span className="text-purple-300 font-bold">{result.performance_metrics.extracted_text_length ?? 0} chars</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Document Payload: </span>
-                        <span className="text-slate-300">{Math.round((result.performance_metrics.document_size_bytes || 0) / 1024)} KB</span>
-                      </div>
-                      <div>
-                        <span className="text-slate-500">Multimodal Fallback: </span>
-                        <span className={result.performance_metrics.pdf_fallback_used ? "text-amber-400 font-bold" : "text-emerald-400 font-bold"}>
-                          {result.performance_metrics.pdf_fallback_used ? "YES (Raw Base64 PDF)" : "NO (In-Browser Text)"}
-                        </span>
-                      </div>
                     </div>
                   </div>
                 )}

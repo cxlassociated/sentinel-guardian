@@ -21,3 +21,56 @@ body {
   background-color: var(--color-bg-light);
   color: #1E293B;
 }
+
+@media print {
+  /* Hide non-report interface elements */
+  aside,
+  header,
+  nav,
+  button,
+  .print\:hidden,
+  .no-print {
+    display: none !important;
+  }
+
+  /* Reset document and container constraints for multi-page document flow */
+  html, body {
+    background: #ffffff !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    font-size: 11pt !important;
+  }
+
+  #root, 
+  .flex, 
+  main,
+  div {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    position: static !important;
+  }
+
+  /* Exact background and border rendering for crisp PDF output */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-shadow: none !important;
+  }
+
+  /* Prevent awkward breaks inside findings and cards */
+  .page-break-inside-avoid,
+  .space-y-3 > div,
+  .space-y-4 > div,
+  .p-4,
+  .p-6 {
+    page-break-inside: avoid;
+    break-inside: avoid;
+  }
+}

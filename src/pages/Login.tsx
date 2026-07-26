@@ -2,11 +2,15 @@ import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
 import { auth } from '../lib/firebase';
-import { Mail, Lock, AlertTriangle, Loader2 } from 'lucide-react';
+import { Mail, Lock, AlertTriangle, Loader2, Zap } from 'lucide-react';
 import { Logo } from '../components/Logo';
+import { getFriendlyErrorMessage } from '../lib/errorHandlers';
+import { useAuth } from '../contexts/AuthContext';
+import { isDevEnvironment } from '../lib/env';
 
 export default function Login() {
   const navigate = useNavigate();
+  const { loginAsDevDemo } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -19,9 +23,22 @@ export default function Login() {
     
     try {
       await signInWithEmailAndPassword(auth, email, password);
-      navigate('/');
+      navigate('/scan');
     } catch (err: any) {
-      setError(err.message || 'Failed to sign in');
+      setError(getFriendlyErrorMessage(err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDemoLogin = () => {
+    setError('');
+    setLoading(true);
+    try {
+      loginAsDevDemo();
+      navigate('/scan');
+    } catch (err: any) {
+      setError(getFriendlyErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -33,10 +50,23 @@ export default function Login() {
     const provider = new GoogleAuthProvider();
     
     try {
-      await signInWithPopup(auth, provider);
+      const result = await signInWithPopup(auth, provider);
+      
+      // Check if user document exists
+      const { getFirestore, doc, getDoc } = await import('firebase/firestore');
+      const db = getFirestore();
+      const userDoc = await getDoc(doc(db, 'users', result.user.uid));
+      
+      if (!userDoc.exists()) {
+        // If they don't exist in Firestore, they need to register their firm first
+        await auth.signOut();
+        setError('No firm account found for this Google account. Please create a firm account first.');
+        return;
+      }
+      
       navigate('/');
     } catch (err: any) {
-      setError(err.message || 'Failed to sign in with Google');
+      setError(getFriendlyErrorMessage(err));
     } finally {
       setLoading(false);
     }
@@ -55,7 +85,21 @@ export default function Login() {
           </p>
         </div>
         
-        <form className="mt-8 space-y-6" onSubmit={handleEmailLogin}>
+        {isDevEnvironment() && (
+          <div className="bg-[#4BB7BA]/10 p-4 rounded-xl border border-[#4BB7BA]/30 text-center space-y-2">
+            <p className="text-xs font-bold text-[#265C7E] uppercase tracking-wider">AI Studio Development Preview</p>
+            <button
+              onClick={handleDemoLogin}
+              disabled={loading}
+              className="w-full flex items-center justify-center gap-2 py-3 px-4 bg-[#4BB7BA] hover:bg-[#3ca3a6] text-white font-bold rounded-lg shadow-sm transition-all hover:shadow text-sm cursor-pointer"
+            >
+              <Zap className="w-4 h-4 fill-current" />
+              <span>⚡ Launch Interactive SG3 Demo</span>
+            </button>
+          </div>
+        )}
+
+        <form className="mt-6 space-y-6" onSubmit={handleEmailLogin}>
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg flex items-start gap-3">
               <AlertTriangle className="h-5 w-5 shrink-0 mt-0.5" />
@@ -171,8 +215,8 @@ export default function Login() {
         
         <p className="mt-8 text-center text-sm text-gray-600 font-medium">
           New firm?{' '}
-          <Link to="/register" className="font-bold text-[#EB5924] hover:text-[#C9491A] transition-colors">
-            Create your firm account
+          <Link to="/register" className="font-extrabold text-lg text-[#EB5924] hover:text-[#C9491A] transition-colors">
+            CREATE NEW ACCOUNT
           </Link>
         </p>
       </div>

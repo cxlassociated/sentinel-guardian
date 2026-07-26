@@ -2,49 +2,133 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
     
-    // Helper functions
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    
     function isAuthenticated() {
       return request.auth != null;
+    }
+    
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
     }
     
     function getUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
-    function isTenantMember(tenantId) {
-      return isAuthenticated() && getUserData().tenantId == tenantId;
+    function isFirmMember(firmId) {
+      return isAuthenticated() && getUserData().firmId == firmId;
     }
+
+    function hasOnlyAllowedFields(fields) {
+      return request.resource.data.keys().hasOnly(fields);
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUser(data) {
+      return hasOnlyAllowedFields(['uid', 'email', 'fullName', 'firmName', 'firmId', 'role', 'createdAt', 'title', 'phone', 'onboardingCompleted']) &&
+             data.uid is string && data.uid == request.auth.uid &&
+             data.email is string && data.email.size() < 100 &&
+             data.fullName is string && data.fullName.size() < 100 &&
+             data.firmName is string && data.firmName.size() < 100 &&
+             data.firmId is string &&
+             data.role in ['firm-admin', 'advisor', 'compliance-officer'] &&
+             (!('title' in data) || (data.title is string && data.title.size() < 100)) &&
+             (!('phone' in data) || (data.phone is string && data.phone.size() < 30)) &&
+             (!('onboardingCompleted' in data) || data.onboardingCompleted is bool) &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidFirm(data) {
+      return hasOnlyAllowedFields(['id', 'name', 'createdAt', 'subscriptionStatus', 'adminUid']) &&
+             data.id is string &&
+             data.name is string && data.name.size() < 100 &&
+             data.subscriptionStatus in ['trial', 'active', 'cancelled'] &&
+             data.adminUid is string && data.adminUid == request.auth.uid &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidScan(data) {
+      return hasOnlyAllowedFields(['firmId', 'userId', 'title', 'type', 'contentUrl', 'risk_level', 'compliance_score', 'violations_detected', 'regulations_triggered', 'rule_references', 'explanation', 'suggested_compliant_revision', 'createdAt']) &&
+             data.firmId is string &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() < 200 &&
+             data.compliance_score is int && data.compliance_score >= 0 && data.compliance_score <= 100 &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidTrade(data) {
+      return hasOnlyAllowedFields(['firmId', 'userId', 'employeeName', 'ticker', 'action', 'quantity', 'price', 'tradeDate', 'status', 'reviewNotes', 'createdAt']) &&
+             data.firmId is string &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.ticker is string && data.ticker.size() < 10 &&
+             data.action in ['BUY', 'SELL'] &&
+             data.status in ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'] &&
+             data.createdAt is timestamp;
+    }
+
+    function isValidConflict(data) {
+      return hasOnlyAllowedFields(['firmId', 'tradeId', 'type', 'severity', 'description', 'status', 'assignedTo', 'createdAt']) &&
+             data.firmId is string &&
+             data.tradeId is string &&
+             data.type in ['FRONT-RUNNING', 'RESTRICTED-LIST', 'INSIDER-TRADING', 'OTHER'] &&
+             data.severity in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] &&
+             data.status in ['OPEN', 'INVESTIGATING', 'RESOLVED', 'DISMISSED'] &&
+             data.createdAt is timestamp;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
 
     // Users collection
     match /users/{userId} {
-      // Users can read their own profile
-      allow read: if isAuthenticated() && request.auth.uid == userId;
-      // Users can read profiles of others in the same tenant
-      allow read: if isAuthenticated() && getUserData().tenantId == resource.data.tenantId;
-      // Only the user can update their own profile
-      allow update: if isAuthenticated() && request.auth.uid == userId;
-      // Allow creation during registration
-      allow create: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isAuthenticated() && (request.auth.uid == userId || getUserData().firmId == resource.data.firmId);
+      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
+                    request.resource.data.role == resource.data.role &&
+                    request.resource.data.firmId == resource.data.firmId;
     }
 
-    // Tenants collection
-    match /tenants/{tenantId} {
-      // Only members of the tenant can read its data
-      allow read: if isTenantMember(tenantId);
-      // Only firm-admins can update tenant settings
-      allow update: if isTenantMember(tenantId) && getUserData().role == 'firm-admin';
-      // Allow creation during registration
-      allow create: if isAuthenticated();
+    // Firms collection
+    match /firms/{firmId} {
+      allow read: if isFirmMember(firmId);
+      allow create: if isAuthenticated() && isValidFirm(request.resource.data);
+      allow update: if isFirmMember(firmId) && getUserData().role == 'firm-admin' && isValidFirm(request.resource.data);
     }
 
     // Scans collection
     match /scans/{scanId} {
-      // Users can only read/write scans that belong to their tenant
-      allow read: if isTenantMember(resource.data.tenantId);
-      allow create: if isTenantMember(request.resource.data.tenantId);
-      // Only firm-admins or compliance-officers can update/delete scans
-      allow update, delete: if isTenantMember(resource.data.tenantId) && 
+      allow read: if isFirmMember(resource.data.firmId);
+      allow create: if isFirmMember(request.resource.data.firmId) && isValidScan(request.resource.data);
+      allow update, delete: if isFirmMember(resource.data.firmId) && 
         (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
+    }
+
+    // Trades collection
+    match /trades/{tradeId} {
+      allow read: if isFirmMember(resource.data.firmId);
+      allow create: if isFirmMember(request.resource.data.firmId) && isValidTrade(request.resource.data);
+      allow update, delete: if isFirmMember(resource.data.firmId) && 
+        (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
+    }
+
+    // Conflicts collection
+    match /conflicts/{conflictId} {
+      allow read: if isFirmMember(resource.data.firmId);
+      allow create: if isFirmMember(request.resource.data.firmId) && isValidConflict(request.resource.data);
+      allow update, delete: if isFirmMember(resource.data.firmId) && 
+        (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
+    }
+    // Scan Cache collection (Aggressive caching)
+    match /scanCache/{hashId} {
+      allow read: if isAuthenticated();
+      allow write: if false; // Enforced via Cloud Functions Admin SDK
     }
   }
 }

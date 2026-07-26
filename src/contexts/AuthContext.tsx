@@ -2,22 +2,67 @@ import React, { createContext, useContext, useEffect, useState } from 'react';
 import { User, onAuthStateChanged } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
+import { isDevEnvironment } from '../lib/env';
 
 interface UserProfile {
   uid: string;
   email: string;
-  tenantId: string;
-  role: 'firm-admin' | 'advisor' | 'compliance-officer';
+  firmId: string;
+  role: 'firm-admin' | 'advisor' | 'compliance-officer' | 'demo';
   firmName: string;
+  fullName: string;
+  title?: string;
+  phone?: string;
+  onboardingCompleted?: boolean;
 }
 
 interface AuthContextType {
   user: User | null;
   profile: UserProfile | null;
   loading: boolean;
+  isDevDemo: boolean;
+  loginAsDevDemo: () => void;
+  logoutDevDemo: () => void;
 }
 
-const AuthContext = createContext<AuthContextType>({ user: null, profile: null, loading: true });
+const DEV_DEMO_USER: User = {
+  uid: 'dev-demo-user-sg3',
+  email: 'demo@sentinelguardian.ai',
+  displayName: 'Compliance Officer',
+  emailVerified: true,
+  isAnonymous: true,
+  metadata: {},
+  providerData: [],
+  refreshToken: '',
+  tenantId: null,
+  delete: async () => {},
+  getIdToken: async () => 'demo-token',
+  getIdTokenResult: async () => ({} as any),
+  reload: async () => {},
+  toJSON: () => ({}),
+  phoneNumber: null,
+  photoURL: null,
+  providerId: 'demo',
+} as unknown as User;
+
+const DEV_DEMO_PROFILE: UserProfile = {
+  uid: 'dev-demo-user-sg3',
+  email: 'demo@sentinelguardian.ai',
+  firmId: 'demo-firm-123',
+  role: 'firm-admin',
+  firmName: 'Demo Advisory Partners',
+  fullName: 'Compliance Officer (Demo)',
+  onboardingCompleted: true,
+};
+
+const AuthContext = createContext<AuthContextType>({ 
+  user: null, 
+  profile: null, 
+  loading: true,
+  isDevDemo: false,
+  loginAsDevDemo: () => {},
+  logoutDevDemo: () => {},
+});
 
 export const useAuth = () => useContext(AuthContext);
 
@@ -25,36 +70,74 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [isDevDemo, setIsDevDemo] = useState(false);
+
+  const loginAsDevDemo = () => {
+    if (!isDevEnvironment()) {
+      console.warn("Dev demo mode is disabled in production/client-test environment.");
+      return;
+    }
+    sessionStorage.setItem('sg3_dev_demo_active', 'true');
+    setUser(DEV_DEMO_USER);
+    setProfile(DEV_DEMO_PROFILE);
+    setIsDevDemo(true);
+    setLoading(false);
+  };
+
+  const logoutDevDemo = () => {
+    sessionStorage.removeItem('sg3_dev_demo_active');
+    setUser(null);
+    setProfile(null);
+    setIsDevDemo(false);
+  };
 
   useEffect(() => {
+    const isDev = isDevEnvironment();
+    if (!isDev) {
+      sessionStorage.removeItem('sg3_dev_demo_active');
+    }
+
+    const isDevDemoSaved = isDev && sessionStorage.getItem('sg3_dev_demo_active') === 'true';
+    if (isDevDemoSaved) {
+      setUser(DEV_DEMO_USER);
+      setProfile(DEV_DEMO_PROFILE);
+      setIsDevDemo(true);
+      setLoading(false);
+      return;
+    }
+
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (isDev && sessionStorage.getItem('sg3_dev_demo_active') === 'true') {
+        return;
+      }
+
       setUser(firebaseUser);
       if (firebaseUser) {
         try {
-          // In a real app, this would fetch the user profile from Firestore
-          // For the preview/demo, we'll mock the profile if it doesn't exist yet
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           if (userDoc.exists()) {
             setProfile(userDoc.data() as UserProfile);
           } else {
-            // Mock profile for demo purposes
             setProfile({
               uid: firebaseUser.uid,
-              email: firebaseUser.email || '',
-              tenantId: 'demo-tenant-123',
+              email: firebaseUser.email || 'demo@sentinelguardian.ai',
+              firmId: 'demo-firm-123',
               role: 'firm-admin',
-              firmName: 'Demo Advisory Partners'
+              firmName: 'Demo Advisory Partners',
+              fullName: firebaseUser.displayName || 'Compliance Officer',
+              onboardingCompleted: true
             });
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
-          // Fallback mock profile
           setProfile({
             uid: firebaseUser.uid,
-            email: firebaseUser.email || '',
-            tenantId: 'demo-tenant-123',
+            email: firebaseUser.email || 'demo@sentinelguardian.ai',
+            firmId: 'demo-firm-123',
             role: 'firm-admin',
-            firmName: 'Demo Advisory Partners'
+            firmName: 'Demo Advisory Partners',
+            fullName: firebaseUser.displayName || 'Compliance Officer',
+            onboardingCompleted: true
           });
         }
       } else {
@@ -66,8 +149,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return unsubscribe;
   }, []);
 
+  const value = React.useMemo(() => ({ 
+    user, 
+    profile, 
+    loading, 
+    isDevDemo, 
+    loginAsDevDemo, 
+    logoutDevDemo 
+  }), [user, profile, loading, isDevDemo]);
+
   return (
-    <AuthContext.Provider value={{ user, profile, loading }}>
+    <AuthContext.Provider value={value}>
       {children}
     </AuthContext.Provider>
   );
