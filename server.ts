@@ -189,26 +189,6 @@ async function startServer() {
     }
   });
 
-  // Direct ZIP export endpoint
-  app.get("/api/export-zip", (req, res) => {
-    res.attachment('sentinel-guardian-source.zip');
-    const archive = archiver('zip', { zlib: { level: 9 } });
-    
-    archive.on('error', (err) => {
-      res.status(500).send({ error: err.message });
-    });
-    
-    archive.pipe(res);
-    
-    archive.glob('**/*', {
-      cwd: process.cwd(),
-      ignore: ['node_modules/**', 'dist/**', '.git/**'],
-      dot: true
-    });
-    
-    archive.finalize();
-  });
-
   // Vite middleware for development
   if (process.env.NODE_ENV !== "production") {
     const vite = await createViteServer({

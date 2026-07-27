@@ -9,11 +9,9 @@ export default defineConfig(({mode}) => {
     base: '/sentinel-guardian/',
     build: {
       outDir: 'dist',
+      sourcemap: false,
     },
     plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
-    },
     resolve: {
       alias: {
         '@': path.resolve(__dirname, '.'),

@@ -226,22 +226,6 @@ export default function Layout() {
         </div>
 
         <div className="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-100 bg-white space-y-2">
-          <div className="px-3 mb-1 flex items-center justify-between">
-            <span className="text-[9px] font-bold text-gray-400 uppercase tracking-widest">Developer Utilities</span>
-            <span className="text-[8px] text-gray-400 font-medium">Updated: Mar 26</span>
-          </div>
-          <a
-            href="/api/export-zip"
-            download
-            className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm font-medium text-emerald-600 hover:bg-emerald-50 transition-all border border-emerald-100/50 group hover:shadow-sm hover:border-emerald-200"
-            title="Download full project source as ZIP"
-          >
-            <div className="p-1.5 bg-emerald-100/50 rounded-md group-hover:bg-emerald-100 transition-colors">
-              <Download className="w-3.5 h-3.5 group-hover:scale-110 transition-transform" />
-            </div>
-            <span className="flex-1">Export Source (ZIP)</span>
-            <span className="text-[8px] font-black px-1 py-0.5 bg-emerald-100 text-emerald-700 rounded uppercase tracking-tighter animate-pulse">Ready</span>
-          </a>
           <a
             href="#"
             className="flex items-center gap-3 px-3 py-2 w-full rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors border border-gray-100 group"
