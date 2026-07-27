@@ -53,15 +53,33 @@ export default function Login() {
       const result = await signInWithPopup(auth, provider);
       
       // Check if user document exists
-      const { getFirestore, doc, getDoc } = await import('firebase/firestore');
+      const { getFirestore, doc, getDoc, setDoc } = await import('firebase/firestore');
       const db = getFirestore();
       const userDoc = await getDoc(doc(db, 'users', result.user.uid));
       
       if (!userDoc.exists()) {
-        // If they don't exist in Firestore, they need to register their firm first
-        await auth.signOut();
-        setError('No firm account found for this Google account. Please create a firm account first.');
-        return;
+        const user = result.user;
+        const finalFirmName = `${user.displayName || 'Advisor'}'s Advisory`;
+        const firmId = `firm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        await setDoc(doc(db, 'users', user.uid), {
+          uid: user.uid,
+          email: user.email || '',
+          fullName: user.displayName || user.email || 'Advisor User',
+          firmName: finalFirmName,
+          firmId: firmId,
+          role: 'firm-admin',
+          onboardingCompleted: false,
+          createdAt: new Date()
+        });
+
+        await setDoc(doc(db, 'firms', firmId), {
+          id: firmId,
+          name: finalFirmName,
+          createdAt: new Date(),
+          subscriptionStatus: 'trial',
+          adminUid: user.uid
+        });
       }
       
       navigate('/');

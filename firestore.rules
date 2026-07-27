@@ -13,13 +13,17 @@ service cloud.firestore {
     function isOwner(userId) {
       return isAuthenticated() && request.auth.uid == userId;
     }
+
+    function userExists() {
+      return isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid));
+    }
     
     function getUserData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
     }
     
     function isFirmMember(firmId) {
-      return isAuthenticated() && getUserData().firmId == firmId;
+      return userExists() && getUserData().firmId == firmId;
     }
 
     function hasOnlyAllowedFields(fields) {
@@ -88,7 +92,7 @@ service cloud.firestore {
 
     // Users collection
     match /users/{userId} {
-      allow read: if isAuthenticated() && (request.auth.uid == userId || getUserData().firmId == resource.data.firmId);
+      allow read: if isAuthenticated() && (request.auth.uid == userId || (userExists() && resource != null && getUserData().firmId == resource.data.firmId));
       allow create: if isOwner(userId) && isValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
                     request.resource.data.role == resource.data.role &&
@@ -99,14 +103,14 @@ service cloud.firestore {
     match /firms/{firmId} {
       allow read: if isFirmMember(firmId);
       allow create: if isAuthenticated() && isValidFirm(request.resource.data);
-      allow update: if isFirmMember(firmId) && getUserData().role == 'firm-admin' && isValidFirm(request.resource.data);
+      allow update: if isFirmMember(firmId) && userExists() && getUserData().role == 'firm-admin' && isValidFirm(request.resource.data);
     }
 
     // Scans collection
     match /scans/{scanId} {
       allow read: if isFirmMember(resource.data.firmId);
       allow create: if isFirmMember(request.resource.data.firmId) && isValidScan(request.resource.data);
-      allow update, delete: if isFirmMember(resource.data.firmId) && 
+      allow update, delete: if isFirmMember(resource.data.firmId) && userExists() && 
         (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
     }
 
@@ -114,7 +118,7 @@ service cloud.firestore {
     match /trades/{tradeId} {
       allow read: if isFirmMember(resource.data.firmId);
       allow create: if isFirmMember(request.resource.data.firmId) && isValidTrade(request.resource.data);
-      allow update, delete: if isFirmMember(resource.data.firmId) && 
+      allow update, delete: if isFirmMember(resource.data.firmId) && userExists() && 
         (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
     }
 
@@ -122,10 +126,11 @@ service cloud.firestore {
     match /conflicts/{conflictId} {
       allow read: if isFirmMember(resource.data.firmId);
       allow create: if isFirmMember(request.resource.data.firmId) && isValidConflict(request.resource.data);
-      allow update, delete: if isFirmMember(resource.data.firmId) && 
+      allow update, delete: if isFirmMember(resource.data.firmId) && userExists() && 
         (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
     }
-    // Scan Cache collection (Aggressive caching)
+
+    // Scan Cache collection
     match /scanCache/{hashId} {
       allow read: if isAuthenticated();
       allow write: if false; // Enforced via Cloud Functions Admin SDK

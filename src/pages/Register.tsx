@@ -51,8 +51,8 @@ export default function Register() {
       try {
         await setDoc(doc(db, 'users', user.uid), {
           uid: user.uid,
-          email: user.email,
-          fullName: user.displayName || '',
+          email: user.email || '',
+          fullName: user.displayName || user.email || 'Advisor User',
           firmName: finalFirmName,
           firmId: firmId,
           role: 'firm-admin',
