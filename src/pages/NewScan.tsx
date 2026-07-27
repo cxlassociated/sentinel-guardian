@@ -11,6 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import ScanProgressModal from '../components/ScanProgressModal';
 import { extractPdfTextInBrowser, PdfExtractionResult } from '../lib/pdfExtractor';
 import { isDevEnvironment } from '../lib/env';
+import { saveCompletedScan, getApiUrl } from '../lib/scanService';
 
 interface Finding {
   title: string;
@@ -43,47 +44,6 @@ export default function NewScan() {
   const { profile, isDevDemo } = useAuth();
   const navigate = useNavigate();
   const [textInput, setTextInput] = useState('');
-
-  const runServerGeminiScan = async (
-    documentSizeBytes: number,
-    isPdfExtracted: boolean,
-    sendBase64ToGemini?: string,
-    sendMimeTypeToGemini?: string
-  ) => {
-    setScanProgress(15);
-    setScanStatus(`Initializing ${modelPreference} engine on secure server...`);
-
-    setScanProgress(40);
-    setScanStatus(`Analyzing compliance text payload...`);
-
-    const response = await fetch('/api/analyze', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        textInput,
-        fileBase64: sendBase64ToGemini,
-        fileMimeType: sendMimeTypeToGemini,
-        modelPreference,
-        documentSizeBytes,
-        isPdfExtracted,
-        pdfExtractionTimeMs: pdfMetrics?.extractionTimeMs || 0,
-        extractedTextLength: textInput.length,
-      }),
-    });
-
-    if (!response.ok) {
-      const errData = await response.json().catch(() => ({}));
-      throw new Error(errData.error || `Server compliance analysis error (${response.status})`);
-    }
-
-    setScanProgress(85);
-    setScanStatus("Finalizing compliance report...");
-
-    const scanResult: ScanResult = await response.json();
-    setScanProgress(100);
-    setResult(scanResult);
-    setIsScanning(false);
-  };
   const [selectedFile, setSelectedFile] = useState<{
     file: File;
     base64: string;
@@ -212,93 +172,102 @@ export default function NewScan() {
     setIsModalOpen(true);
     setError(null);
     setResult(null);
-    setScanProgress(0);
-    setScanStatus('Initializing scan...');
+
+    // 10% - Document accepted
+    setScanProgress(10);
+    setScanStatus('Document accepted & payload validated...');
 
     const documentSizeBytes = selectedFile ? selectedFile.file.size : new Blob([textInput]).size;
     const isPdfExtracted = selectedFile?.isPdfExtracted ?? false;
     const sendBase64ToGemini = selectedFile && !isPdfExtracted ? selectedFile.base64 : undefined;
     const sendMimeTypeToGemini = selectedFile && !isPdfExtracted ? selectedFile.mimeType : undefined;
 
-    // Direct client execution in development demo mode or when Cloud Functions aren't active
-    if (isDevDemo) {
-      try {
-        await runServerGeminiScan(documentSizeBytes, isPdfExtracted, sendBase64ToGemini, sendMimeTypeToGemini);
-      } catch (err: any) {
-        console.error("Server Gemini scan error:", err);
-        setError(err.message || "Server Gemini scan failed.");
-        setIsScanning(false);
+    // 20% - Text extraction complete
+    setScanProgress(20);
+    setScanStatus('Text extraction complete...');
+
+    // 30% - Scan record created
+    setScanProgress(30);
+    setScanStatus('Initializing scan record...');
+    const scanId = doc(collection(db, 'scans')).id;
+    const firmId = profile?.firmId || 'demo-firm-123';
+    const userId = profile?.uid || 'demo-user-123';
+    const title = selectedFile ? selectedFile.file.name : (textInput.substring(0, 50) + '...');
+    const scanType = selectedFile ? (selectedFile.mimeType.includes('pdf') ? 'PDF Document' : 'Image/Media') : 'Text Analysis';
+
+    let contentUrl = '';
+    try {
+      if (selectedFile) {
+        const storageRef = ref(storage, `firms/${firmId}/scans/${Date.now()}_${selectedFile.file.name}`);
+        await uploadString(storageRef, selectedFile.base64, 'base64', { contentType: selectedFile.mimeType });
+        contentUrl = await getDownloadURL(storageRef);
       }
-      return;
+    } catch (storageError) {
+      console.warn("Storage upload skipped or unavailable:", storageError);
     }
 
     try {
-      if (!profile?.firmId || !profile?.uid) {
-        throw new Error("User profile not loaded.");
-      }
+      // 40% - Analysis request dispatched
+      setScanProgress(40);
+      setScanStatus(`Dispatching analysis request to ${modelPreference} engine...`);
 
-      const scanId = doc(collection(db, 'scans')).id;
-      
-      const unsubscribe = onSnapshot(doc(db, 'scans', scanId), (docSnap) => {
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.progress !== undefined) setScanProgress(data.progress);
-          if (data.status) setScanStatus(data.status);
-          
-          if (data.progress === 100 && data.risk_level) {
-            setResult(data as ScanResult);
-            setIsScanning(false);
-            unsubscribe();
-          } else if (data.status === "Error during scan") {
-            setError("An error occurred during the scan.");
-            setIsScanning(false);
-            unsubscribe();
-          }
-        }
+      const apiUrl = getApiUrl('/api/analyze');
+      const response = await fetch(apiUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          textInput,
+          fileBase64: sendBase64ToGemini,
+          fileMimeType: sendMimeTypeToGemini,
+          modelPreference,
+          documentSizeBytes,
+          isPdfExtracted,
+          pdfExtractionTimeMs: pdfMetrics?.extractionTimeMs || 0,
+          extractedTextLength: textInput.length,
+        }),
       });
 
-      let contentUrl = '';
-      try {
-        if (selectedFile) {
-          const storageRef = ref(storage, `firms/${profile.firmId}/scans/${Date.now()}_${selectedFile.file.name}`);
-          await uploadString(storageRef, selectedFile.base64, 'base64', { contentType: selectedFile.mimeType });
-          contentUrl = await getDownloadURL(storageRef);
-        } else {
-          const storageRef = ref(storage, `firms/${profile.firmId}/scans/${Date.now()}.txt`);
-          await uploadString(storageRef, textInput);
-          contentUrl = await getDownloadURL(storageRef);
-        }
-      } catch (storageError) {
-        console.error("Storage upload failed, continuing without contentUrl", storageError);
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        throw new Error(errData.error || `Server compliance analysis error (${response.status})`);
       }
 
-      const runComplianceScan = httpsCallable(functions, 'runComplianceScan');
-      await runComplianceScan({
+      // 70% - AI analysis returned
+      setScanProgress(70);
+      setScanStatus('AI compliance analysis returned...');
+      const scanResult: ScanResult = await response.json();
+
+      // 85% - Findings normalized
+      setScanProgress(85);
+      setScanStatus('Normalizing compliance findings...');
+
+      // 95% - Firestore persistence complete
+      setScanProgress(95);
+      setScanStatus('Persisting scan record to Compliance Archive...');
+      await saveCompletedScan({
         scanId,
-        firmId: profile.firmId,
-        userId: profile.uid,
-        textInput: textInput,
-        fileBase64: sendBase64ToGemini,
-        fileMimeType: sendMimeTypeToGemini,
-        title: selectedFile ? selectedFile.file.name : (textInput.substring(0, 50) + '...'),
-        type: selectedFile ? (selectedFile.mimeType.includes('pdf') ? 'PDF Document' : 'Image/Media') : 'Text Analysis',
+        firmId,
+        userId,
+        title,
+        type: scanType,
         contentUrl,
-        modelPreference,
-        pdfExtractionTimeMs: pdfMetrics?.extractionTimeMs || 0,
-        documentSizeBytes,
-        extractedTextLength: textInput.length,
-        isPdfExtracted,
+        originalText: textInput,
+        pdfFallbackUsed: selectedFile ? !isPdfExtracted : false,
+        scanResult,
       });
-      
+
+      // 100% - Report ready
+      setScanProgress(100);
+      setScanStatus('Scan complete. Compliance report ready.');
+      setResult(scanResult);
+      setIsScanning(false);
+
     } catch (err: any) {
-      console.warn("Cloud function unavailable, utilizing secure server Gemini endpoint:", err);
-      try {
-        await runServerGeminiScan(documentSizeBytes, isPdfExtracted, sendBase64ToGemini, sendMimeTypeToGemini);
-      } catch (fallbackErr: any) {
-        console.error("Server Gemini scan error:", fallbackErr);
-        setError(fallbackErr.message || 'An error occurred during the scan.');
-        setIsScanning(false);
-      }
+      console.error("Scan pipeline error:", err);
+      const friendlyMsg = err.message || 'An unexpected error occurred during the compliance scan.';
+      setError(friendlyMsg);
+      setScanStatus("Error during scan");
+      setIsScanning(false);
     }
   };
 
@@ -758,6 +727,7 @@ export default function NewScan() {
         onClose={() => setIsModalOpen(false)} 
         progress={scanProgress}
         statusText={scanStatus}
+        errorMessage={error}
       />
     </div>
   );

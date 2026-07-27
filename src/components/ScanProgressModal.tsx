@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Zap, Clock, CheckCircle2 } from 'lucide-react';
+import { X, Zap, Clock, CheckCircle2, AlertTriangle } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -12,9 +12,18 @@ interface ScanProgressModalProps {
   onComplete?: () => void;
   progress?: number;
   statusText?: string;
+  errorMessage?: string | null;
 }
 
-export default function ScanProgressModal({ isOpen, onClose, isScanning = true, onComplete, progress: externalProgress, statusText: externalStatusText }: ScanProgressModalProps) {
+export default function ScanProgressModal({
+  isOpen,
+  onClose,
+  isScanning = true,
+  onComplete,
+  progress: externalProgress,
+  statusText: externalStatusText,
+  errorMessage
+}: ScanProgressModalProps) {
   const [internalProgress, setInternalProgress] = useState(0);
   const [timeLeft, setTimeLeft] = useState(45); // seconds
   const navigate = useNavigate();
@@ -180,7 +189,17 @@ export default function ScanProgressModal({ isOpen, onClose, isScanning = true, 
 
               <div className="h-8 flex items-center justify-center mb-2">
                 <AnimatePresence mode="wait">
-                  {isComplete ? (
+                  {errorMessage ? (
+                    <motion.h3 
+                      key="error"
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      className="text-xl font-bold text-red-700 flex items-center gap-2"
+                    >
+                      <AlertTriangle className="w-6 h-6 text-red-600" />
+                      Scan Error
+                    </motion.h3>
+                  ) : isComplete ? (
                     <motion.h3 
                       key="complete"
                       initial={{ opacity: 0, y: 10 }}
@@ -204,14 +223,14 @@ export default function ScanProgressModal({ isOpen, onClose, isScanning = true, 
                       exit={{ opacity: 0, y: 10 }}
                       className="text-xl font-bold text-gray-900"
                     >
-                      Scanning Document...
+                      {externalStatusText || "Scanning Document..."}
                     </motion.h3>
                   )}
                 </AnimatePresence>
               </div>
               
-              <div className="flex items-center justify-center gap-2 text-sm text-gray-500 mb-6 h-5">
-                {!isComplete && (
+              <div className="flex items-center justify-center gap-2 text-sm text-gray-500 mb-6 min-h-[20px]">
+                {!isComplete && !errorMessage && (
                   <motion.div 
                     initial={{ opacity: 0 }} 
                     animate={{ opacity: 1 }} 
@@ -224,16 +243,26 @@ export default function ScanProgressModal({ isOpen, onClose, isScanning = true, 
                 )}
               </div>
 
-              <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex items-start gap-3 text-left">
-                <div className="p-2 bg-emerald-100 rounded-lg shrink-0">
-                  <Zap className="w-5 h-5 text-emerald-600" />
+              {errorMessage ? (
+                <div className="bg-red-50 border border-red-200 rounded-xl p-4 flex items-start gap-3 text-left">
+                  <AlertTriangle className="w-5 h-5 text-red-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-red-900 uppercase tracking-wider">Analysis Failed</p>
+                    <p className="text-sm text-red-700 mt-1">{errorMessage}</p>
+                  </div>
                 </div>
-                <div className="flex items-center h-full min-h-[40px]">
-                  <p className="text-sm font-medium text-emerald-800 leading-relaxed">
-                    We’ll notify you the moment it’s complete.
-                  </p>
+              ) : (
+                <div className="bg-emerald-50 border border-emerald-100 rounded-xl p-4 flex items-start gap-3 text-left">
+                  <div className="p-2 bg-emerald-100 rounded-lg shrink-0">
+                    <Zap className="w-5 h-5 text-emerald-600" />
+                  </div>
+                  <div className="flex items-center h-full min-h-[40px]">
+                    <p className="text-sm font-medium text-emerald-800 leading-relaxed">
+                      We’ll notify you the moment it’s complete.
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="h-10 mt-6">
                 <AnimatePresence>

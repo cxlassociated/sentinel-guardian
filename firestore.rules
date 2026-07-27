@@ -71,7 +71,14 @@ service cloud.firestore {
     }
 
     function isValidScan(data) {
-      return hasOnlyAllowedFields(['firmId', 'userId', 'title', 'type', 'contentUrl', 'risk_level', 'compliance_score', 'violations_detected', 'regulations_triggered', 'rule_references', 'explanation', 'suggested_compliant_revision', 'createdAt']) &&
+      return hasOnlyAllowedFields([
+               'firmId', 'userId', 'title', 'type', 'contentUrl',
+               'risk_level', 'compliance_score', 'riskScore', 'status', 'progress',
+               'violations_detected', 'regulations_triggered', 'rule_references',
+               'privacy_findings', 'marketing_findings', 'explanation',
+               'suggested_compliant_revision', 'performance_metrics',
+               'pdf_fallback_used', 'originalText', 'createdAt', 'completedAt'
+             ]) &&
              data.firmId is string &&
              data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() < 200 &&
