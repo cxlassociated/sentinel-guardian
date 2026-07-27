@@ -14,6 +14,56 @@ export interface ScanResultPayload {
   performance_metrics?: Record<string, any>;
 }
 
+export interface CreateInitialScanInput {
+  scanId: string;
+  firmId: string;
+  userId: string;
+  title: string;
+  type: string;
+  contentUrl?: string;
+  originalText?: string;
+  pdfFallbackUsed?: boolean;
+}
+
+export async function createInitialScan(input: CreateInitialScanInput): Promise<string> {
+  const {
+    scanId,
+    firmId,
+    userId,
+    title,
+    type,
+    contentUrl = '',
+    originalText = '',
+    pdfFallbackUsed = false,
+  } = input;
+
+  const scanRef = doc(db, 'scans', scanId);
+  const payload = {
+    firmId,
+    userId,
+    title: title.substring(0, 195),
+    type: type || 'Text Analysis',
+    contentUrl,
+    originalText: originalText.substring(0, 5000),
+    status: 'processing',
+    progress: 30,
+    pdf_fallback_used: pdfFallbackUsed,
+    createdAt: serverTimestamp(),
+  };
+
+  const writePromise = setDoc(scanRef, payload, { merge: true });
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Firestore initial scan creation timed out after 5 seconds')), 5000)
+  );
+
+  try {
+    await Promise.race([writePromise, timeoutPromise]);
+  } catch (err: any) {
+    console.warn("createInitialScan warning (continuing pipeline):", err?.message || err);
+  }
+  return scanId;
+}
+
 export interface SaveScanInput {
   scanId?: string;
   firmId: string;
@@ -49,6 +99,8 @@ export async function saveCompletedScan(input: SaveScanInput): Promise<string> {
     status = 'flagged';
   }
 
+  const score = Math.round(Number(scanResult.compliance_score) || 0);
+
   const payload = {
     firmId,
     userId,
@@ -57,8 +109,8 @@ export async function saveCompletedScan(input: SaveScanInput): Promise<string> {
     contentUrl,
     originalText: originalText.substring(0, 5000),
     risk_level: scanResult.risk_level,
-    compliance_score: scanResult.compliance_score,
-    riskScore: scanResult.compliance_score,
+    compliance_score: score,
+    riskScore: score,
     status,
     progress: 100,
     violations_detected: scanResult.violations_detected || [],
@@ -74,7 +126,17 @@ export async function saveCompletedScan(input: SaveScanInput): Promise<string> {
     completedAt: serverTimestamp(),
   };
 
-  await setDoc(scanRef, payload, { merge: true });
+  const writePromise = setDoc(scanRef, payload, { merge: true });
+  const timeoutPromise = new Promise((_, reject) =>
+    setTimeout(() => reject(new Error('Firestore saveCompletedScan timed out after 8 seconds')), 8000)
+  );
+
+  try {
+    await Promise.race([writePromise, timeoutPromise]);
+  } catch (err: any) {
+    console.error("saveCompletedScan error:", err);
+    throw new Error(`Failed to persist scan record to Firestore: ${err?.message || 'Unknown error'}`);
+  }
   return targetDocId;
 }
 

@@ -11,7 +11,7 @@ import { useNavigate } from 'react-router-dom';
 import ScanProgressModal from '../components/ScanProgressModal';
 import { extractPdfTextInBrowser, PdfExtractionResult } from '../lib/pdfExtractor';
 import { isDevEnvironment } from '../lib/env';
-import { saveCompletedScan, getApiUrl } from '../lib/scanService';
+import { saveCompletedScan, createInitialScan, getApiUrl } from '../lib/scanService';
 
 interface Finding {
   title: string;
@@ -173,40 +173,61 @@ export default function NewScan() {
     setError(null);
     setResult(null);
 
-    // 10% - Document accepted
-    setScanProgress(10);
-    setScanStatus('Document accepted & payload validated...');
-
-    const documentSizeBytes = selectedFile ? selectedFile.file.size : new Blob([textInput]).size;
-    const isPdfExtracted = selectedFile?.isPdfExtracted ?? false;
-    const sendBase64ToGemini = selectedFile && !isPdfExtracted ? selectedFile.base64 : undefined;
-    const sendMimeTypeToGemini = selectedFile && !isPdfExtracted ? selectedFile.mimeType : undefined;
-
-    // 20% - Text extraction complete
-    setScanProgress(20);
-    setScanStatus('Text extraction complete...');
-
-    // 30% - Scan record created
-    setScanProgress(30);
-    setScanStatus('Initializing scan record...');
-    const scanId = doc(collection(db, 'scans')).id;
-    const firmId = profile?.firmId || 'demo-firm-123';
-    const userId = profile?.uid || 'demo-user-123';
-    const title = selectedFile ? selectedFile.file.name : (textInput.substring(0, 50) + '...');
-    const scanType = selectedFile ? (selectedFile.mimeType.includes('pdf') ? 'PDF Document' : 'Image/Media') : 'Text Analysis';
-
-    let contentUrl = '';
     try {
+      // 10% - Document accepted
+      setScanProgress(10);
+      setScanStatus('Document accepted & payload validated...');
+
+      const documentSizeBytes = selectedFile ? selectedFile.file.size : new Blob([textInput]).size;
+      const isPdfExtracted = selectedFile?.isPdfExtracted ?? false;
+      const sendBase64ToGemini = selectedFile && !isPdfExtracted ? selectedFile.base64 : undefined;
+      const sendMimeTypeToGemini = selectedFile && !isPdfExtracted ? selectedFile.mimeType : undefined;
+
+      // 20% - Text extraction complete
+      setScanProgress(20);
+      setScanStatus('Text extraction complete...');
+
+      // 30% - Scan record created
+      setScanProgress(30);
+      setScanStatus('Initializing scan record...');
+      const scanId = doc(collection(db, 'scans')).id;
+      const firmId = profile?.firmId || 'demo-firm-123';
+      const userId = profile?.uid || 'demo-user-123';
+      const title = selectedFile ? selectedFile.file.name : (textInput.substring(0, 50) + '...');
+      const scanType = selectedFile ? (selectedFile.mimeType.includes('pdf') ? 'PDF Document' : 'Image/Media') : 'Text Analysis';
+
+      let contentUrl = '';
       if (selectedFile) {
-        const storageRef = ref(storage, `firms/${firmId}/scans/${Date.now()}_${selectedFile.file.name}`);
-        await uploadString(storageRef, selectedFile.base64, 'base64', { contentType: selectedFile.mimeType });
-        contentUrl = await getDownloadURL(storageRef);
+        try {
+          const uploadPromise = (async () => {
+            const storageRef = ref(storage, `firms/${firmId}/scans/${Date.now()}_${selectedFile.file.name}`);
+            await uploadString(storageRef, selectedFile.base64, 'base64', { contentType: selectedFile.mimeType });
+            return await getDownloadURL(storageRef);
+          })();
+          const storageTimeoutPromise = new Promise<string>((_, reject) =>
+            setTimeout(() => reject(new Error('Storage upload timeout')), 3000)
+          );
+          contentUrl = await Promise.race([uploadPromise, storageTimeoutPromise]).catch(err => {
+            console.warn("Storage upload skipped or timed out:", err?.message || err);
+            return '';
+          });
+        } catch (storageErr) {
+          console.warn("Storage upload skipped or unavailable:", storageErr);
+        }
       }
-    } catch (storageError) {
-      console.warn("Storage upload skipped or unavailable:", storageError);
-    }
 
-    try {
+      // Record initial scan record in Firestore (processing status)
+      await createInitialScan({
+        scanId,
+        firmId,
+        userId,
+        title,
+        type: scanType,
+        contentUrl,
+        originalText: textInput,
+        pdfFallbackUsed: selectedFile ? !isPdfExtracted : false,
+      });
+
       // 40% - Analysis request dispatched
       setScanProgress(40);
       setScanStatus(`Dispatching analysis request to ${modelPreference} engine...`);

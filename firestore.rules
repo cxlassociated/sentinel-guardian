@@ -70,7 +70,19 @@ service cloud.firestore {
              (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
-    function isValidScan(data) {
+    function isValidInitialScan(data) {
+      return hasOnlyAllowedFields([
+               'firmId', 'userId', 'title', 'type', 'contentUrl',
+               'status', 'progress', 'pdf_fallback_used', 'originalText', 'createdAt'
+             ]) &&
+             data.firmId is string &&
+             data.userId is string && data.userId == request.auth.uid &&
+             data.title is string && data.title.size() < 200 &&
+             data.status in ['processing', 'passed', 'flagged', 'review', 'error'] &&
+             (data.createdAt is timestamp || data.createdAt == request.time);
+    }
+
+    function isValidCompletedScan(data) {
       return hasOnlyAllowedFields([
                'firmId', 'userId', 'title', 'type', 'contentUrl',
                'risk_level', 'compliance_score', 'riskScore', 'status', 'progress',
@@ -82,7 +94,8 @@ service cloud.firestore {
              data.firmId is string &&
              data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() < 200 &&
-             data.compliance_score is int && data.compliance_score >= 0 && data.compliance_score <= 100 &&
+             (data.compliance_score is number || data.compliance_score is int) &&
+             data.compliance_score >= 0 && data.compliance_score <= 100 &&
              (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
@@ -128,9 +141,14 @@ service cloud.firestore {
 
     // Scans collection
     match /scans/{scanId} {
-      allow read: if isFirmMember(resource.data.firmId);
-      allow create: if isFirmMember(request.resource.data.firmId) && isValidScan(request.resource.data);
-      allow update, delete: if isFirmMember(resource.data.firmId) && userExists() && 
+      allow read: if isAuthenticated() && (isFirmMember(resource.data.firmId) || resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() &&
+                     request.resource.data.userId == request.auth.uid &&
+                     (isValidInitialScan(request.resource.data) || isValidCompletedScan(request.resource.data));
+      allow update: if isAuthenticated() &&
+                     request.resource.data.userId == request.auth.uid &&
+                     (isValidInitialScan(request.resource.data) || isValidCompletedScan(request.resource.data));
+      allow delete: if isFirmMember(resource.data.firmId) && userExists() && 
         (getUserData().role == 'firm-admin' || getUserData().role == 'compliance-officer');
     }
 
