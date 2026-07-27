@@ -262,20 +262,24 @@ export default function NewScan() {
       setScanProgress(85);
       setScanStatus('Normalizing compliance findings...');
 
-      // 95% - Firestore persistence complete
+      // 95% - Persistence check
       setScanProgress(95);
-      setScanStatus('Persisting scan record to Compliance Archive...');
-      await saveCompletedScan({
-        scanId,
-        firmId,
-        userId,
-        title,
-        type: scanType,
-        contentUrl,
-        originalText: textInput,
-        pdfFallbackUsed: selectedFile ? !isPdfExtracted : false,
-        scanResult,
-      });
+      if (auth.currentUser) {
+        setScanStatus('Persisting scan record to Compliance Archive...');
+        await saveCompletedScan({
+          scanId,
+          firmId,
+          userId: auth.currentUser.uid,
+          title,
+          type: scanType,
+          contentUrl,
+          originalText: textInput,
+          pdfFallbackUsed: selectedFile ? !isPdfExtracted : false,
+          scanResult,
+        });
+      } else {
+        setScanStatus('Demo session — report generated (not archived to Firestore)...');
+      }
 
       // 100% - Report ready
       setScanProgress(100);
@@ -551,6 +555,16 @@ export default function NewScan() {
                     </div>
                   </div>
                 </div>
+
+                {/* Demo session indicator banner */}
+                {!auth.currentUser && (
+                  <div className="p-3 bg-amber-50 border border-amber-200 text-amber-900 rounded-lg text-xs font-medium flex items-center justify-between print:hidden">
+                    <span className="flex items-center gap-1.5">
+                      <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span><strong>Demo session — not archived.</strong> Sign in with a registered user account to persist scans to the Compliance Archive.</span>
+                    </span>
+                  </div>
+                )}
 
                 {/* Score Header */}
                 <div className={`p-6 rounded-xl border ${getRiskColor(result.risk_level)} print:border-2 print:border-gray-300 print:bg-transparent print:text-gray-900`}>

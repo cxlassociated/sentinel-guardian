@@ -71,8 +71,7 @@ service cloud.firestore {
     }
 
     function isScanOwner(data) {
-      return (isAuthenticated() && data.userId == request.auth.uid) ||
-             (data.userId in ['dev-demo-user-sg3', 'demo-user-123']);
+      return isAuthenticated() && data.userId == request.auth.uid;
     }
 
     function isValidInitialScan(data) {
@@ -81,7 +80,7 @@ service cloud.firestore {
                'status', 'progress', 'pdf_fallback_used', 'originalText', 'createdAt'
              ]) &&
              data.firmId is string &&
-             data.userId is string &&
+             data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() < 200 &&
              data.status in ['processing', 'passed', 'flagged', 'review', 'completed', 'error'] &&
              (data.createdAt is timestamp || data.createdAt == request.time);
@@ -95,10 +94,10 @@ service cloud.firestore {
                'rule_references', 'ruleReferences', 'privacy_findings', 'marketing_findings',
                'findings', 'explanation', 'analysisSummary', 'suggested_compliant_revision',
                'suggestedRevision', 'performance_metrics', 'pdf_fallback_used', 'originalText',
-               'createdAt', 'completedAt'
+               'createdAt', 'completedAt', 'metadata', 'model', 'provider', 'duration'
              ]) &&
              data.firmId is string &&
-             data.userId is string &&
+             data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() < 200 &&
              (!('compliance_score' in data) || ((data.compliance_score is number || data.compliance_score is int) && data.compliance_score >= 0 && data.compliance_score <= 100)) &&
              (!('riskScore' in data) || ((data.riskScore is number || data.riskScore is int) && data.riskScore >= 0 && data.riskScore <= 100)) &&

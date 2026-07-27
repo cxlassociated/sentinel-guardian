@@ -1,5 +1,5 @@
 import { doc, setDoc, serverTimestamp } from 'firebase/firestore';
-import { db } from './firebase';
+import { db, auth } from './firebase';
 
 export interface ScanResultPayload {
   risk_level: 'LOW RISK' | 'MODERATE RISK' | 'HIGH RISK' | 'CRITICAL RISK';
@@ -26,6 +26,11 @@ export interface CreateInitialScanInput {
 }
 
 export async function createInitialScan(input: CreateInitialScanInput): Promise<string> {
+  if (!auth.currentUser) {
+    console.info("Demo session (unauthenticated in Firebase) — skipping initial Firestore scan record creation.");
+    return input.scanId;
+  }
+
   const {
     scanId,
     firmId,
@@ -40,7 +45,7 @@ export async function createInitialScan(input: CreateInitialScanInput): Promise<
   const scanRef = doc(db, 'scans', scanId);
   const payload = {
     firmId,
-    userId,
+    userId: auth.currentUser.uid,
     title: title.substring(0, 195),
     type: type || 'Text Analysis',
     contentUrl,
@@ -77,10 +82,14 @@ export interface SaveScanInput {
 }
 
 export async function saveCompletedScan(input: SaveScanInput): Promise<string> {
+  if (!auth.currentUser) {
+    console.info("Demo session (unauthenticated in Firebase) — skipping Firestore completed scan persistence.");
+    return input.scanId || `demo_scan_${Date.now()}`;
+  }
+
   const {
     scanId,
     firmId,
-    userId,
     title,
     type,
     contentUrl = '',
@@ -103,7 +112,7 @@ export async function saveCompletedScan(input: SaveScanInput): Promise<string> {
 
   const payload = {
     firmId,
-    userId,
+    userId: auth.currentUser.uid,
     title: title.substring(0, 195),
     type: type || 'Text Analysis',
     contentUrl,
