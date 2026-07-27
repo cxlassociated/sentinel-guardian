@@ -5,7 +5,7 @@ import { UploadCloud, FileText, AlertTriangle, CheckCircle, Loader2, Info, Arrow
 import { collection, addDoc, serverTimestamp, doc, onSnapshot } from 'firebase/firestore';
 import { ref, uploadString, getDownloadURL } from 'firebase/storage';
 import { httpsCallable } from 'firebase/functions';
-import { db, storage, functions } from '../lib/firebase';
+import { db, storage, functions, auth } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import ScanProgressModal from '../components/ScanProgressModal';
@@ -41,7 +41,7 @@ interface ScanResult {
 }
 
 export default function NewScan() {
-  const { profile, isDevDemo } = useAuth();
+  const { profile, user, isDevDemo } = useAuth();
   const navigate = useNavigate();
   const [textInput, setTextInput] = useState('');
   const [selectedFile, setSelectedFile] = useState<{
@@ -192,7 +192,7 @@ export default function NewScan() {
       setScanStatus('Initializing scan record...');
       const scanId = doc(collection(db, 'scans')).id;
       const firmId = profile?.firmId || 'demo-firm-123';
-      const userId = profile?.uid || 'demo-user-123';
+      const userId = auth.currentUser?.uid || user?.uid || profile?.uid || 'dev-demo-user-sg3';
       const title = selectedFile ? selectedFile.file.name : (textInput.substring(0, 50) + '...');
       const scanType = selectedFile ? (selectedFile.mimeType.includes('pdf') ? 'PDF Document' : 'Image/Media') : 'Text Analysis';
 
