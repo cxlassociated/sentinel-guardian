@@ -118,27 +118,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (userDoc.exists()) {
             setProfile(userDoc.data() as UserProfile);
           } else {
-            setProfile({
-              uid: firebaseUser.uid,
-              email: firebaseUser.email || 'demo@sentinelguardian.ai',
-              firmId: 'demo-firm-123',
-              role: 'firm-admin',
-              firmName: 'Demo Advisory Partners',
-              fullName: firebaseUser.displayName || 'Compliance Officer',
-              onboardingCompleted: true
-            });
+            setProfile(null);
           }
         } catch (error) {
           console.error("Error fetching user profile:", error);
-          setProfile({
-            uid: firebaseUser.uid,
-            email: firebaseUser.email || 'demo@sentinelguardian.ai',
-            firmId: 'demo-firm-123',
-            role: 'firm-admin',
-            firmName: 'Demo Advisory Partners',
-            fullName: firebaseUser.displayName || 'Compliance Officer',
-            onboardingCompleted: true
-          });
+          setProfile(null);
         }
       } else {
         setProfile(null);

@@ -40,21 +40,34 @@ service cloud.firestore {
              data.email is string && data.email.size() < 100 &&
              data.fullName is string && data.fullName.size() < 100 &&
              data.firmName is string && data.firmName.size() < 100 &&
-             data.firmId is string &&
+             data.firmId is string && data.firmId.size() > 0 &&
              data.role in ['firm-admin', 'advisor', 'compliance-officer'] &&
              (!('title' in data) || (data.title is string && data.title.size() < 100)) &&
              (!('phone' in data) || (data.phone is string && data.phone.size() < 30)) &&
              (!('onboardingCompleted' in data) || data.onboardingCompleted is bool) &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time);
+    }
+
+    function isCreatingValidUser(data) {
+      return isValidUser(data) &&
+             (
+               // Atomic batch creation of firm-admin profile and firm record
+               (data.role == 'firm-admin' && 
+                existsAfter(/databases/$(database)/documents/firms/$(data.firmId)) &&
+                getAfter(/databases/$(database)/documents/firms/$(data.firmId)).data.adminUid == request.auth.uid)
+               ||
+               // User belongs to an existing firm
+               (exists(/databases/$(database)/documents/firms/$(data.firmId)))
+             );
     }
 
     function isValidFirm(data) {
       return hasOnlyAllowedFields(['id', 'name', 'createdAt', 'subscriptionStatus', 'adminUid']) &&
-             data.id is string &&
+             data.id is string && data.id.size() > 0 &&
              data.name is string && data.name.size() < 100 &&
              data.subscriptionStatus in ['trial', 'active', 'cancelled'] &&
              data.adminUid is string && data.adminUid == request.auth.uid &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
     function isValidScan(data) {
@@ -63,7 +76,7 @@ service cloud.firestore {
              data.userId is string && data.userId == request.auth.uid &&
              data.title is string && data.title.size() < 200 &&
              data.compliance_score is int && data.compliance_score >= 0 && data.compliance_score <= 100 &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
     function isValidTrade(data) {
@@ -73,7 +86,7 @@ service cloud.firestore {
              data.ticker is string && data.ticker.size() < 10 &&
              data.action in ['BUY', 'SELL'] &&
              data.status in ['PENDING', 'APPROVED', 'FLAGGED', 'REJECTED'] &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
     function isValidConflict(data) {
@@ -83,7 +96,7 @@ service cloud.firestore {
              data.type in ['FRONT-RUNNING', 'RESTRICTED-LIST', 'INSIDER-TRADING', 'OTHER'] &&
              data.severity in ['LOW', 'MEDIUM', 'HIGH', 'CRITICAL'] &&
              data.status in ['OPEN', 'INVESTIGATING', 'RESOLVED', 'DISMISSED'] &&
-             data.createdAt is timestamp;
+             (data.createdAt is timestamp || data.createdAt == request.time);
     }
 
     // ===============================================================
@@ -93,7 +106,7 @@ service cloud.firestore {
     // Users collection
     match /users/{userId} {
       allow read: if isAuthenticated() && (request.auth.uid == userId || (userExists() && resource != null && getUserData().firmId == resource.data.firmId));
-      allow create: if isOwner(userId) && isValidUser(request.resource.data);
+      allow create: if isOwner(userId) && isCreatingValidUser(request.resource.data);
       allow update: if isOwner(userId) && isValidUser(request.resource.data) && 
                     request.resource.data.role == resource.data.role &&
                     request.resource.data.firmId == resource.data.firmId;
@@ -101,7 +114,7 @@ service cloud.firestore {
 
     // Firms collection
     match /firms/{firmId} {
-      allow read: if isFirmMember(firmId);
+      allow read: if isAuthenticated() && (isFirmMember(firmId) || (resource != null && resource.data.adminUid == request.auth.uid));
       allow create: if isAuthenticated() && isValidFirm(request.resource.data);
       allow update: if isFirmMember(firmId) && userExists() && getUserData().role == 'firm-admin' && isValidFirm(request.resource.data);
     }

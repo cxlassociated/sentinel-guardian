@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { createUserWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, writeBatch, serverTimestamp } from 'firebase/firestore';
 import { auth, db } from '../lib/firebase';
 import { Building2, User, Mail, Lock, AlertTriangle, Loader2 } from 'lucide-react';
 import { Logo } from '../components/Logo';
@@ -41,40 +41,37 @@ export default function Register() {
         return;
       }
 
-      // 2. If not registered, create firm and user records
-      // Use the firm name from the form if provided, otherwise use a default
+      // 2. If not registered, create firm and user records atomically
       const finalFirmName = formData.firmName.trim() || `${user.displayName || 'New'}'s Advisory`;
       const firmId = `firm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-      // Create user profile
-      const userPath = `users/${user.uid}`;
-      try {
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: user.email || '',
-          fullName: user.displayName || user.email || 'Advisor User',
-          firmName: finalFirmName,
-          firmId: firmId,
-          role: 'firm-admin',
-          onboardingCompleted: false,
-          createdAt: new Date()
-        });
-      } catch (err) {
-        handleFirestoreError(auth, err, OperationType.WRITE, userPath);
-      }
+      const batch = writeBatch(db);
+      const userRef = doc(db, 'users', user.uid);
+      const firmRef = doc(db, 'firms', firmId);
 
-      // Create firm record
-      const firmPath = `firms/${firmId}`;
+      batch.set(userRef, {
+        uid: user.uid,
+        email: user.email || '',
+        fullName: user.displayName || user.email || 'Advisor User',
+        firmName: finalFirmName,
+        firmId: firmId,
+        role: 'firm-admin',
+        onboardingCompleted: false,
+        createdAt: serverTimestamp()
+      });
+
+      batch.set(firmRef, {
+        id: firmId,
+        name: finalFirmName,
+        createdAt: serverTimestamp(),
+        subscriptionStatus: 'trial',
+        adminUid: user.uid
+      });
+
       try {
-        await setDoc(doc(db, 'firms', firmId), {
-          id: firmId,
-          name: finalFirmName,
-          createdAt: new Date(),
-          subscriptionStatus: 'trial',
-          adminUid: user.uid
-        });
+        await batch.commit();
       } catch (err) {
-        handleFirestoreError(auth, err, OperationType.WRITE, firmPath);
+        handleFirestoreError(auth, err, OperationType.WRITE, `users/${user.uid} & firms/${firmId}`);
       }
 
       navigate('/');
@@ -103,36 +100,36 @@ export default function Register() {
 
       // 2. Generate a firm ID
       const firmId = `firm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      const finalFirmName = formData.firmName.trim() || `${formData.fullName}'s Advisory`;
 
-      // 3. Create user profile in Firestore
-      const userPath = `users/${user.uid}`;
-      try {
-        await setDoc(doc(db, 'users', user.uid), {
-          uid: user.uid,
-          email: formData.email,
-          fullName: formData.fullName,
-          firmName: formData.firmName,
-          firmId: firmId,
-          role: 'firm-admin',
-          onboardingCompleted: false,
-          createdAt: new Date()
-        });
-      } catch (err) {
-        handleFirestoreError(auth, err, OperationType.WRITE, userPath);
-      }
+      // 3. Create user profile and firm record atomically in Firestore
+      const batch = writeBatch(db);
+      const userRef = doc(db, 'users', user.uid);
+      const firmRef = doc(db, 'firms', firmId);
 
-      // 4. Create firm record
-      const firmPath = `firms/${firmId}`;
+      batch.set(userRef, {
+        uid: user.uid,
+        email: formData.email,
+        fullName: formData.fullName,
+        firmName: finalFirmName,
+        firmId: firmId,
+        role: 'firm-admin',
+        onboardingCompleted: false,
+        createdAt: serverTimestamp()
+      });
+
+      batch.set(firmRef, {
+        id: firmId,
+        name: finalFirmName,
+        createdAt: serverTimestamp(),
+        subscriptionStatus: 'trial',
+        adminUid: user.uid
+      });
+
       try {
-        await setDoc(doc(db, 'firms', firmId), {
-          id: firmId,
-          name: formData.firmName,
-          createdAt: new Date(),
-          subscriptionStatus: 'trial',
-          adminUid: user.uid
-        });
+        await batch.commit();
       } catch (err) {
-        handleFirestoreError(auth, err, OperationType.WRITE, firmPath);
+        handleFirestoreError(auth, err, OperationType.WRITE, `users/${user.uid} & firms/${firmId}`);
       }
 
       navigate('/');

@@ -53,7 +53,7 @@ export default function Login() {
       const result = await signInWithPopup(auth, provider);
       
       // Check if user document exists
-      const { getFirestore, doc, getDoc, setDoc } = await import('firebase/firestore');
+      const { getFirestore, doc, getDoc, writeBatch, serverTimestamp } = await import('firebase/firestore');
       const db = getFirestore();
       const userDoc = await getDoc(doc(db, 'users', result.user.uid));
       
@@ -62,7 +62,11 @@ export default function Login() {
         const finalFirmName = `${user.displayName || 'Advisor'}'s Advisory`;
         const firmId = `firm_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
-        await setDoc(doc(db, 'users', user.uid), {
+        const batch = writeBatch(db);
+        const userRef = doc(db, 'users', user.uid);
+        const firmRef = doc(db, 'firms', firmId);
+
+        batch.set(userRef, {
           uid: user.uid,
           email: user.email || '',
           fullName: user.displayName || user.email || 'Advisor User',
@@ -70,16 +74,18 @@ export default function Login() {
           firmId: firmId,
           role: 'firm-admin',
           onboardingCompleted: false,
-          createdAt: new Date()
+          createdAt: serverTimestamp()
         });
 
-        await setDoc(doc(db, 'firms', firmId), {
+        batch.set(firmRef, {
           id: firmId,
           name: finalFirmName,
-          createdAt: new Date(),
+          createdAt: serverTimestamp(),
           subscriptionStatus: 'trial',
           adminUid: user.uid
         });
+
+        await batch.commit();
       }
       
       navigate('/');

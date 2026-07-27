@@ -42,14 +42,35 @@ export function getFriendlyErrorMessage(error: any): string {
         return 'Password is too weak. Please use at least 6 characters.';
       case 'auth/user-not-found':
       case 'auth/wrong-password':
+      case 'auth/invalid-credential':
         return 'Invalid email or password.';
       case 'permission-denied':
-        return 'You do not have permission to perform this action.';
+        return 'Account setup permission error. Please verify your permissions or try again.';
       default:
         return error.message;
     }
   }
-  return error.message || 'An unexpected error occurred.';
+
+  const rawMsg = error?.message || (typeof error === 'string' ? error : '');
+  if (rawMsg.includes('permission-denied') || rawMsg.includes('Missing or insufficient permissions')) {
+    return 'Permission denied when creating user profile or accessing firm data.';
+  }
+
+  if (rawMsg.trim().startsWith('{')) {
+    try {
+      const parsed = JSON.parse(rawMsg);
+      if (parsed.error && typeof parsed.error === 'string') {
+        if (parsed.error.includes('permission') || parsed.error.includes('Missing or insufficient permissions')) {
+          return 'Permission denied when accessing user profile or firm data.';
+        }
+        return parsed.error;
+      }
+    } catch {
+      // ignore JSON parse error
+    }
+  }
+
+  return rawMsg || 'An unexpected error occurred.';
 }
 
 export function handleFirestoreError(auth: any, error: unknown, operationType: OperationType, path: string | null) {
@@ -72,7 +93,11 @@ export function handleFirestoreError(auth: any, error: unknown, operationType: O
     path
   };
   
-  const jsonString = JSON.stringify(errInfo);
-  console.error('Firestore Error: ', jsonString);
-  throw new Error(jsonString);
+  console.error('[Firestore Diagnostic Info]:', JSON.stringify(errInfo, null, 2));
+  
+  const originalMsg = error instanceof Error ? error.message : String(error);
+  if (originalMsg.includes('permission') || originalMsg.includes('Missing or insufficient permissions')) {
+    throw new Error('Permission denied when accessing user profile or firm data.');
+  }
+  throw error instanceof Error ? error : new Error(originalMsg);
 }
